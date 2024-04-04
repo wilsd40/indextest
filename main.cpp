@@ -9,6 +9,8 @@
 #include <optional>
 #include <utility>
 #include <cassert>
+#include <algorithm>
+
 
 
 
@@ -166,6 +168,18 @@ public:
         }
     return rv;
     }
+    
+void sort_pairs(result_vector& vp) {
+    std::sort(vp.begin(), vp.end(), [](auto val1, auto val2) {return ((val1.second != val2.second) ? (val1.second > val2.second) : (val1.first < val2.first));});    
+}
+void separate_pairs(const result_vector& vp, std::vector<int>& vec1, std::vector<int>& vec2){
+    // this still need to be adapted (copy and pasted from other code; need to be adapted to class structure
+    
+    vec1.clear();
+    vec2.clear();
+    std::transform(vp.begin(), vp.end(), std::back_inserter(vec1), [] (const std::pair<int, int> p) {return p.first;});
+    std::transform(vp.begin(), vp.end(), std::back_inserter(vec2), [] (const std::pair<int, int> p) {return p.second;});
+}
 
 // function to find primer in template.  calls query_index
 bool search_string(std::string query, int dir, int min_match) {
@@ -205,7 +219,7 @@ bool search_string(std::string query, int dir, int min_match) {
         //for (auto fi:query_res){
             
             
-            std::cout << "Starting at position "<<fi << std::endl;
+            //std::cout << "Starting at position "<<fi << std::endl;
            
         
    
@@ -216,8 +230,8 @@ bool search_string(std::string query, int dir, int min_match) {
             //bool found = false;
             while (((start_nuc - xtend - 1) >= 0 ) && (fi - xtend - 1) >=0){
                 //std::cout << "------" << std::endl;
-                std::cout << "before: bounds checks : start_nuc-xtend-1: " << start_nuc-xtend-1 << " fi - xtend - 1:  " << (fi - xtend - 1)<<std::endl;
-                std::cout << xtend << " comparing " << query.at(start_nuc - xtend - 1) << " to " << ge.at(fi - xtend - 1) << std::endl;
+                //std::cout << "before: bounds checks : start_nuc-xtend-1: " << start_nuc-xtend-1 << " fi - xtend - 1:  " << (fi - xtend - 1)<<std::endl;
+                //std::cout << xtend << " comparing " << query.at(start_nuc - xtend - 1) << " to " << ge.at(fi - xtend - 1) << std::endl;
                 if ((query.at(start_nuc - xtend - 1)) == ge.at(fi - xtend - 1)) {
                     ++xtend;
                     //std::cout << "after: bounds checks : start_nuc-xtend-1: " << start_nuc-xtend-1 << " fi - xtend - 1:  " << (fi - xtend - 1)<<std::endl;
@@ -236,6 +250,8 @@ bool search_string(std::string query, int dir, int min_match) {
             }
             }
     }
+    sort_pairs(fwd_result);
+    
     
 return 0;
 
@@ -315,24 +331,24 @@ std::string st3 {"TATATATACGATTCGATCGTAA"};
 Timer ti;
 ti.reset();
     
-//Genome gen = Genome("/home/dan/pcr3/COH1.fasta");
+Genome gen = Genome("/home/dan/pcr3/COH1.fasta");
 ti.reset();
-GenomeIndex gi2 {st2, 5};
+GenomeIndex gi2 {gen, 5};
 
 //GenomeIndex gi2 {st2, 5};
 
 
 //std::cout << ti.elapsed() << std::endl;
 std::cout << "buckets" << gi2.get_index().bucket_count() << std::endl;
-GenomeIndexSearch gs {st2, gi2};
+GenomeIndexSearch gs {gen, gi2};
 
 std::string ss {"ATATGCCGA"};
-gs.search_string(ss,0, 8);
+gs.search_string(ss,0, 7);
 gs.display_fwd_hits();
 
-auto res = alt_find(st2, ss);
-auto mism = compare_hits(res, gs);
-std::cout << " Mismatches = "<<mism<<std::endl;
+//auto res = alt_find(st2, ss);
+//auto mism = compare_hits(res, gs);
+//std::cout << " Mismatches = "<<mism<<std::endl;
 
 //std::cout << "Map size: " << estimate_memory_size(gi.get_index()) << std::endl;
 
