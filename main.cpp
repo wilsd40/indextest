@@ -4,12 +4,15 @@
 #include <vector>
 #include "genome.h"
 #include <climits>
+#include <cctype>
 #include <chrono>
 #include <numeric>
 #include <optional>
 #include <utility>
 #include <cassert>
 #include <algorithm>
+#include <map>
+#include <stdexcept>
 
 
 
@@ -36,7 +39,7 @@ class GenomeIndex{
     
     // note: ksize of 5 is a good compromise between speed of index creation (almost instantaneous) and search.
     // at least for a bacterial-sized search string.
-    
+friend class Genome;
 using string_map = std::unordered_map<std::string, std::vector<int>>;
 // this map provides constant access time, kmers are the string, and positions are in the vector.
 using result_vector = std::vector<std::pair<int, int>>;
@@ -45,33 +48,46 @@ using result_vector = std::vector<std::pair<int, int>>;
 
 private:
     string_map mp;
+    string_map mp_comp;
+    string_map mp_rev_comp;
 
     
 public:
     int ksize;
     
 GenomeIndex(const std::string& te1, int ksize1) {
-    make_index(te1, ksize1);
-    this->ksize = ksize1;
+    make_index(te1, ksize1, mp);
+    make_index(te1, ksize, mp_comp);
+    make_index(te1, ksize, mp_rev_comp);
+    this->ksize = ksize;
     }
     
 GenomeIndex(const Genome& ge, int ksize1){
-    make_index(ge.get_genome(), ksize1);
+    make_index(ge.get_genome(), ksize1, mp);
+    make_index(ge.get_complement(), ksize, mp_comp);
+    make_index(ge.get_rev_comp(), ksize, mp_rev_comp);
     this->ksize = ksize1;
 }
     
-void make_index(const std::string& te, int ksize) {
+void make_index(const std::string& te, int ksize, string_map& targ) {
     for (size_t i {0}; i < te.size() - ksize + 1; ++i) {
         std::string kmer = te.substr(i, ksize);
-        mp[kmer].push_back(i); // no need the create an entry if one doesn't exist, it is already initialized
+        targ[kmer].push_back(i); // no need the create an entry if one doesn't exist, it is already initialized
     }
     
 }
-
 
 const string_map& get_index() const{
     return mp;
 }
+
+const string_map& get_comp_index() const {
+    return mp_comp;
+}
+const string_map& get_rev_comp_index() const {
+    return mp_rev_comp;
+}
+
 
 void display() {
     if (mp.size() < 1000) {
@@ -102,11 +118,17 @@ using result_vector = std::vector<std::pair<int, int>>;
 
 private:
     const std::string& ge;
+    const int ksize;
     const string_map& gi;
+    const std::string& ge_comp;
+    const string_map& gi_comp;
+    const std::string& ge_rev_comp;
+    const string_map& gi_rev_comp;
     std::string quer;
-    int ksize;
+    
     int min_match;
     int direction; // 0, fwd, 1, rev, 2, don't know
+    
     result_vector fwd_result;
     result_vector rev_result;
     result_vector result_return;
@@ -114,32 +136,38 @@ private:
 
     
 public:
-   
-    std::unordered_map<char, char> comp;
-     
-    GenomeIndexSearch(Genome& gearg, const GenomeIndex& giarg, std::optional<int> arg3 = std::nullopt): ge {gearg.get_genome()}, gi {giarg.get_index()},
-        ksize {giarg.get_ksize()}{
-        std::cout << "ksize = "<<ksize << std::endl;
-        // constructor for using Genome object
-        comp = {{'A', 'T'}, {'T', 'A'}, {'G', 'C'}, {'C', 'G'}} ; // when refactor, use this.
-        
-        
-        // for reverse complement
-
-        if (arg3.has_value()) {
-            if (arg3 > 0 && arg3 < 3) {
-                direction = arg3.value();
-            }
+    static int validate_k_ge(const Genome& gea, int ks) {
+        if (gea.get_genome().size() < ks) {
+            throw std::invalid_argument("ksize must less than genome size");
         }
+        return ks;
     }
+    static int validate_k_string(const std::string& gea, int ks) {
+        if (gea.size() < ks) {
+            throw std::invalid_argument("ksize must less than genome size");
+        }
+        return ks;
+    }
+        
+    std::map<char, char> comp = {{'A', 'T'}, {'T', 'A'}, {'G', 'C'}, {'C', 'G'}} ;
+   
+
+     
+    GenomeIndexSearch(const Genome& gearg, int ks): ge {gearg.get_genome()}, ksize {validate_k_ge(gearg.get_genome(), ks)},
+    gi {(GenomeIndex (gearg.get_genome(), ksize)).get_index()}, ge_comp {gearg.get_complement()},
+        gi_comp {(GenomeIndex (gearg.get_complement(), ks)).get_index()}, ge_rev_comp {gearg.get_rev_comp()},
+        gi_rev_comp {(GenomeIndex (gearg.get_rev_comp(), ks)).get_index()}
+        {
+        std::cout << "ksize = "<<ksize << std::endl;
+    }
+    
     GenomeIndexSearch(std::string& gearg, const GenomeIndex& giarg, std::optional<int> arg3 = std::nullopt): ge {gearg}, gi {giarg.get_index()},
         ksize {giarg.get_ksize()}{
             std::cout << "ksize = "<<ksize << std::endl;
-        // constructor for using Genome object
-        comp = {{'A', 'T'}, {'T', 'A'}, {'G', 'C'}, {'C', 'G'}} ;
-        
-        
-        // for reverse complement
+        // constructor for using string.
+        // need to make complements.
+     
+
 
         if (arg3.has_value()) {
             if (arg3 > 0 && arg3 < 3) {
@@ -317,13 +345,23 @@ void print_alt(std::vector<size_t> vec) {
         std::cout << i << std::endl;
     }
 }
+
+void ToUpper(std::string& st) {
+    std::transform(st.begin(), st.end(), st.begin(), ::toupper);
+}
+
+
     
 
 
 
 
 int main(){
-std::string astring {"ATGCGGGGGGGGGGTCAGACCCCCCTA"};
+    
+Genome g2 = Genome("/home/dan/pcr3/test.fasta", false);
+
+
+/*std::string astring {"ATGCGGGGGGGGGGTCAGACCCCCCTA"};
 
 
 std::string st2 {"TATATATGCCGATCGGGATCCAT"};
@@ -332,19 +370,23 @@ Timer ti;
 ti.reset();
     
 Genome gen = Genome("/home/dan/pcr3/COH1.fasta");
+Genome g2 = Genome("/home/dan/pcr3/test.fasta");
 ti.reset();
-GenomeIndex gi2 {gen, 5};
+std::cout << g2.get_genome() << std::endl;
+std::cout << g2.get_complement() << std::endl;
+std::cout << g2.get_rev_comp() << std::endl;*/
+//GenomeIndex gi2 {gen, 5};
 
 //GenomeIndex gi2 {st2, 5};
 
 
 //std::cout << ti.elapsed() << std::endl;
-std::cout << "buckets" << gi2.get_index().bucket_count() << std::endl;
-GenomeIndexSearch gs {gen, gi2};
+//std::cout << "buckets" << gi2.get_index().bucket_count() << std::endl;
+//GenomeIndexSearch gs {gen, gi2};
 
-std::string ss {"ATATGCCGA"};
-gs.search_string(ss,0, 7);
-gs.display_fwd_hits();
+//std::string ss {"ATATGCCGA"};
+//gs.search_string(ss,0, 7);
+//gs.display_fwd_hits();
 
 //auto res = alt_find(st2, ss);
 //auto mism = compare_hits(res, gs);
