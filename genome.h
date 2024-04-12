@@ -9,6 +9,7 @@
 
 
 class Genome{
+    friend class GenomeIndexSearch;
 public:
     std::map<char, char> comp = {{'A', 'T'}, {'T', 'A'}, {'G', 'C'}, {'C', 'G'}} ;
     Genome(std::string arg, bool sequence = true);

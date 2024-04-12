@@ -17,6 +17,8 @@
 
 
 
+enum class Direction {FWD=0, COMP=1, REV_COMP=2};
+
 class Timer {
 private:
     using Clock = std::chrono::steady_clock;
@@ -36,10 +38,11 @@ public:
 
 
 class GenomeIndex{
+    friend class GenomeIndexSearch;
     
     // note: ksize of 5 is a good compromise between speed of index creation (almost instantaneous) and search.
     // at least for a bacterial-sized search string.
-friend class Genome;
+
 using string_map = std::unordered_map<std::string, std::vector<int>>;
 // this map provides constant access time, kmers are the string, and positions are in the vector.
 using result_vector = std::vector<std::pair<int, int>>;
@@ -57,15 +60,15 @@ public:
     
 GenomeIndex(const std::string& te1, int ksize1) {
     make_index(te1, ksize1, mp);
-    make_index(te1, ksize, mp_comp);
-    make_index(te1, ksize, mp_rev_comp);
+    make_index(te1, ksize1, mp_comp);
+    make_index(te1, ksize1, mp_rev_comp);
     this->ksize = ksize;
     }
     
 GenomeIndex(const Genome& ge, int ksize1){
     make_index(ge.get_genome(), ksize1, mp);
-    make_index(ge.get_complement(), ksize, mp_comp);
-    make_index(ge.get_rev_comp(), ksize, mp_rev_comp);
+    make_index(ge.get_complement(), ksize1, mp_comp);
+    make_index(ge.get_rev_comp(), ksize1, mp_rev_comp);
     this->ksize = ksize1;
 }
     
@@ -76,6 +79,9 @@ void make_index(const std::string& te, int ksize, string_map& targ) {
     }
     
 }
+
+// consider searching index here?
+
 
 const string_map& get_index() const{
     return mp;
@@ -111,19 +117,19 @@ const int get_ksize() const{
 };
 
 class GenomeIndexSearch {
+friend class Genome;
+friend class GenomeIndex;
 using string_map = std::unordered_map<std::string, std::vector<int>>;
 // this map provides constant access time, kmers are the string, and positions are in the vector.
 using result_vector = std::vector<std::pair<int, int>>;
 // results for query: [start position, length of identity].    
 
 private:
-    const std::string& ge;
-    const int ksize;
-    const string_map& gi;
-    const std::string& ge_comp;
-    const string_map& gi_comp;
-    const std::string& ge_rev_comp;
-    const string_map& gi_rev_comp;
+    const Genome& gen; // will be passed in via constructor
+    const int ksize; // passed into constructor
+    GenomeIndex gin; // will be created in constructor
+
+
     std::string quer;
     
     int min_match;
@@ -137,13 +143,13 @@ private:
     
 public:
     static int validate_k_ge(const Genome& gea, int ks) {
-        if (gea.get_genome().size() < ks) {
+        if ((int)gea.get_genome().size() < ks) {
             throw std::invalid_argument("ksize must less than genome size");
         }
         return ks;
     }
     static int validate_k_string(const std::string& gea, int ks) {
-        if (gea.size() < ks) {
+        if ((int)gea.size() < ks) {
             throw std::invalid_argument("ksize must less than genome size");
         }
         return ks;
@@ -153,35 +159,44 @@ public:
    
 
      
-    GenomeIndexSearch(const Genome& gearg, int ks): ge {gearg.get_genome()}, ksize {validate_k_ge(gearg.get_genome(), ks)},
-    gi {(GenomeIndex (gearg.get_genome(), ksize)).get_index()}, ge_comp {gearg.get_complement()},
-        gi_comp {(GenomeIndex (gearg.get_complement(), ks)).get_index()}, ge_rev_comp {gearg.get_rev_comp()},
-        gi_rev_comp {(GenomeIndex (gearg.get_rev_comp(), ks)).get_index()}
-        {
+    GenomeIndexSearch(const Genome& gearg, int ks): gen {gearg}, ksize {validate_k_ge(gearg.get_genome(), ks)},
+        gin {GenomeIndex(gearg.get_genome(), ksize)} {
         std::cout << "ksize = "<<ksize << std::endl;
+        std::cout << "The genome size is "<<gen.get_genome().size() << std::endl;
     }
     
-    GenomeIndexSearch(std::string& gearg, const GenomeIndex& giarg, std::optional<int> arg3 = std::nullopt): ge {gearg}, gi {giarg.get_index()},
-        ksize {giarg.get_ksize()}{
-            std::cout << "ksize = "<<ksize << std::endl;
+    //GenomeIndexSearch(std::string& gearg, const GenomeIndex& giarg, std::optional<int> arg3 = std::nullopt): ge {gearg}, gi {giarg.get_index()},
+    //    ksize {giarg.get_ksize()}{
+    //        std::cout << "ksize = "<<ksize << std::endl;
         // constructor for using string.
         // need to make complements.
      
 
 
-        if (arg3.has_value()) {
-            if (arg3 > 0 && arg3 < 3) {
-                direction = arg3.value();
-            }
-        }
-    }
+    //}
 // workhorse function for finding seed strings in index.  returns a vector of positions for which the string can be found.    
-    std::vector<int> query_index(std::string query) {
+    std::vector<int> query_index(std::string query, Direction dir) {
         // make sure the check that query was length of index.
         std::string found;
         std::vector<int>rv;
-        auto it1 = gi.find(query);
-        if (it1 == gi.end()) {
+        string_map& gioption {gin.mp}; // need to initialize it temporarily. not sure if this is the best
+        // to do this but don't want to make a copy and need to declare it.
+        
+        
+        switch (dir) {
+            case Direction::FWD:
+                // gioption already set to forward
+                break;
+            case Direction::COMP:
+                gioption = gin.mp_comp;
+                break;
+            case Direction::REV_COMP:
+                gioption = gin.mp_rev_comp;
+                break;
+        }
+        
+        auto it1 = gioption.find(query);
+        if (it1 == gioption.end()) {
             rv.push_back(-1);
         }
         else {
@@ -210,54 +225,60 @@ void separate_pairs(const result_vector& vp, std::vector<int>& vec1, std::vector
 }
 
 // function to find primer in template.  calls query_index
-bool search_string(std::string query, int dir, int min_match) {
+bool search_string(std::string query, Direction dir, int min_match) {
     // this method will be called by another method to specify dir.  
     // search the subject with the query 
     // dir : 0 for forward primer (will start at 3' end and work backward on fwd strand
     //     : 1 for reverse primer (will make reverse complement, start at 5' end and work forward on fwd strand
-    int end_nuc {-1};
+    //int end_nuc {-1};
     
     //need to check min_match vs query.
     std::cout << (int)query.length() << ": ksize :" <<ksize << std::endl;
     assert ((int)query.length() >= ksize);
     assert (min_match >= ksize);
-    if (dir == 0) { // forward primer
+    if (dir == Direction::FWD) { // forward primer
+        std::cout << "Searching in foward direction" << std::endl;
+        std::string ge=gen.get_genome();
+        //std::cout << "Genome is "  << ge << std::endl;
         fwd_result.clear();
+        std::cout << ge.size() << " genome size" << std::endl;
+        
         //std::cout << (int)query.length() << std::endl;
         int start_nuc {(int)query.length() - ksize}; // 
         
         
-        //std::cout << "Start nuc: "<<start_nuc<<std::endl;
+        std::cout << "Start nuc: "<<start_nuc<<std::endl;
  
         
 
         std::string qu_nucs = query.substr(start_nuc, ksize);
-        //std::cout << "Will start search with: "<< qu_nucs << std::endl;
+        std::cout << "Will start search with: "<< qu_nucs << std::endl;
 
-        auto indexstart = query_index(qu_nucs);
+        auto indexstart = query_index(qu_nucs, dir);
         if (indexstart.size() == 1 && indexstart.at(0) == -1) {
             std::cout << "search string not found" << std::endl;
             fwd_result.push_back(std::pair<int, int>{-1, -1});
             return 1;
             
         }
+        std::cout << "Index size "<<indexstart.size() << std::endl;
         for (auto fi:indexstart) {
         //auto fi = starttry.at(0);
         
         //for (auto fi:query_res){
             
             
-            //std::cout << "Starting at position "<<fi << std::endl;
+            std::cout << "Starting at position "<<fi << std::endl;
            
         
    
             std::string result_string;
             int xtend {0};
-            //std::cout << "conditions" << (start_nuc - xtend - 1) << " " << (fi - xtend - 1) << std::endl;
+            std::cout << "conditions" << (start_nuc - xtend - 1) << " " << (fi - xtend - 1) << std::endl;
             // shouldn't have to check 3' bounds
             //bool found = false;
             while (((start_nuc - xtend - 1) >= 0 ) && (fi - xtend - 1) >=0){
-                //std::cout << "------" << std::endl;
+                std::cout << "------" << std::endl;
                 //std::cout << "before: bounds checks : start_nuc-xtend-1: " << start_nuc-xtend-1 << " fi - xtend - 1:  " << (fi - xtend - 1)<<std::endl;
                 //std::cout << xtend << " comparing " << query.at(start_nuc - xtend - 1) << " to " << ge.at(fi - xtend - 1) << std::endl;
                 if ((query.at(start_nuc - xtend - 1)) == ge.at(fi - xtend - 1)) {
@@ -301,6 +322,7 @@ result_vector get_fwd() {
     
     
 void display_fwd_hits() {
+    const std::string& ge {gen.genome};
     if (!check_fwd()){
         for (auto i: fwd_result) {
             int st = i.first;
@@ -358,12 +380,27 @@ void ToUpper(std::string& st) {
 
 int main(){
     
+// AAGCTACCTGCTAGGGCGAC
+    
 Genome g2 = Genome("/home/dan/pcr3/test.fasta", false);
+std::cout << g2.get_size() << std::endl;
+std::cout << g2.get_genome() << std::endl;
+GenomeIndexSearch gs {g2, 7};
+auto res = gs.query_index("AGGGCGA", Direction::FWD);
+for (auto i:res) {
+    std::cout << i << " ";
+}
+
+gs.search_string("TAGGGCGA", Direction::FWD, 7);
+gs.display_fwd_hits();
 
 
-/*std::string astring {"ATGCGGGGGGGGGGTCAGACCCCCCTA"};
 
+//std::string astring {"ATGCGGGGGGGGGGTCAGACCCCCCTA"};
 
+//GenomeIndexSearch gs {g2, 7};
+
+/*
 std::string st2 {"TATATATGCCGATCGGGATCCAT"};
 std::string st3 {"TATATATACGATTCGATCGTAA"};
 Timer ti;
